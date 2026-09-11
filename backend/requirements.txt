@@ -1,0 +1,36 @@
+# CareerOS backend dependencies
+# Install: pip install -r requirements.txt
+# (LaTeX rendering uses the Tectonic binary, not a pip package - install separately, see notes below)
+
+# ---------------- Web framework (Phase 1+) ----------------
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# ---------------- Config ----------------
+pydantic>=2.7
+pydantic-settings>=2.4
+
+# ---------------- Database ----------------
+psycopg[binary]>=3.2       # Postgres driver
+pgvector>=0.3.6            # Python helpers for vector columns (register_vector, adapters)
+sqlalchemy>=2.0            # ORM, once you move past raw SQL scripts
+alembic>=1.13              # migrations, once the schema starts changing after initial setup
+
+# ---------------- Gemini ----------------
+google-genai>=2.3          # confirm this is still current when you install - Google's SDK naming has churned
+
+# ---------------- Auth (multi-user ready) ----------------
+python-jose[cryptography]>=3.3   # JWT encode/decode
+passlib[bcrypt]>=1.7             # password hashing
+
+# JD URL scraping (trafilatura + httpx) moved to requirements-scraping.txt -
+# it's a Phase 2 need, not a Phase 0/1 one, and its lxml dependency has been
+# causing resolver conflicts on newer Python versions. Install that file
+# separately when you actually reach JD-URL ingestion.
+
+# ---------------- Resume templating ----------------
+jinja2>=3.1                # renders your LaTeX template with real data
+
+# ---------------- Dev / testing ----------------
+pytest>=8.2
+python-dotenv>=1.0         # only needed if you load .env outside of pydantic-settings (e.g. in ad-hoc scripts)

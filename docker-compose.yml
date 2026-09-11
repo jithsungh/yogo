@@ -1,0 +1,49 @@
+# CareerOS - local dev infra
+# Usage:
+#   docker compose up -d              -> starts Postgres only
+#   docker compose --profile tools up -d pgadmin   -> also start pgAdmin (optional DB browser)
+#
+# First run automatically executes every .sql file in ./db/init (in filename order),
+# so drop db/init/01_schema.sql there and the KB schema is created on first boot.
+# If you change the schema afterwards, init scripts do NOT re-run on an existing volume -
+# run migrations manually or `docker compose down -v` to wipe and reinit during early dev.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: career_copilot_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - career_copilot_pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional - a GUI to browse the DB. Not required; skip if you're happy with psql/DBeaver/TablePlus.
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: career_copilot_pgadmin
+    restart: unless-stopped
+    # profiles: ["tools"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  career_copilot_pgdata:
