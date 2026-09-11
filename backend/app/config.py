@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     gemini_api_key: str
     # Model names move fast - check https://ai.google.dev/gemini-api/docs/models
     # before assuming these defaults are current.
-    gemini_generation_model: str = "gemini-3.8-flash"
+    gemini_generation_model: str = "gemini-3.5-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768
 
@@ -70,6 +70,12 @@ class Settings(BaseSettings):
 
     # ---------------- File storage ----------------
     resume_storage_dir: str = "./data/resumes"
+
+    # ---------------- Phase 1: single-user bootstrap ----------------
+    default_user_id: str = ""  # UUID string, set after running create_default_user.py
+
+    # ---------------- GitHub import ----------------
+    github_token: str = ""  # optional — unauthenticated GitHub API = 60 req/hr, with token = 5000/hr
 
 
 @lru_cache
