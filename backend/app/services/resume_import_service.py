@@ -11,22 +11,99 @@ from google import genai
 from google.genai import types as genai_types
 from app.config import get_settings
 
-EXTRACTION_PROMPT = """You are extracting structured data from a resume. Extract ONLY what is
-explicitly stated in the text below. Do not infer, estimate, or invent any
-detail, number, date, or skill that isn't directly present. If a field is
-not present for an item, omit that field entirely rather than guessing.
+EXTRACTION_PROMPT = """You are a meticulous resume parser. Your job is to extract EVERY piece of
+structured data from the resume below with maximum fidelity. Extract ONLY
+what is explicitly stated — do NOT infer, estimate, or invent details.
 
-Return ONLY raw JSON (no markdown fences, no commentary) matching exactly
-this shape:
+IMPORTANT RULES:
+- Read the ENTIRE resume carefully. Resumes use many layouts: columns, tables,
+  headers, sidebars. Do NOT skip any section.
+- For DATES: Use "YYYY-MM-DD" format. If only month+year is given (e.g.
+  "Jan 2022" or "01/2022"), use "YYYY-MM-01" (first of that month). If only
+  a year is given (e.g. "2022"), use "YYYY-01-01". If the end date says
+  "Present", "Current", "Ongoing", or similar, use the string "present".
+- For DESCRIPTIONS: Capture ALL bullet points, responsibilities, and
+  achievements verbatim. Join multiple bullets with newline characters (\\n).
+  Do NOT summarize or truncate — include every bullet point exactly as written.
+- For TECH STACK: Extract individual technology names as separate array items.
+  Parse them from descriptions, bullet points, and dedicated "Technologies"
+  or "Tech Stack" lines.
+- If a field has no data in the resume, OMIT that field entirely from the
+  output rather than using empty strings or null.
+
+Return ONLY raw JSON (no markdown fences, no commentary) matching this schema:
 
 {
-  "basic_info": {"full_name": "", "email": "", "phone": "", "location": "", "links": {"github": "", "linkedin": "", "portfolio": ""}},
-  "education": [{"degree": "", "institution": "", "start_date": "", "end_date": "", "score": "", "highlights": ""}],
-  "work_experience": [{"company": "", "role_title": "", "start_date": "", "end_date": "", "description": "", "tech_stack": []}],
-  "projects": [{"title": "", "description": "", "tech_stack": [], "github_url": "", "live_url": "", "highlights": ""}],
-  "skills": [{"name": "", "category": "language|framework|cloud|devops|ml|database|tool|soft_skill"}],
-  "certifications": [{"title": "", "issuer": "", "date": "", "url": ""}]
+  "basic_info": {
+    "full_name": "Full name of the candidate",
+    "email": "Email address",
+    "phone": "Phone number (preserve original formatting)",
+    "location": "City, State/Country as written",
+    "summary": "Professional summary/objective paragraph if present at top of resume",
+    "links": {
+      "github": "GitHub profile URL",
+      "linkedin": "LinkedIn profile URL",
+      "portfolio": "Personal website/portfolio URL",
+      "leetcode": "LeetCode profile URL",
+      "twitter": "Twitter/X profile URL",
+      "other": "Any other profile URLs as comma-separated string"
+    }
+  },
+  "education": [
+    {
+      "degree": "Full degree name (e.g. 'Bachelor of Technology in Computer Science')",
+      "institution": "University/college name",
+      "start_date": "YYYY-MM-DD (see date rules above)",
+      "end_date": "YYYY-MM-DD or 'present'",
+      "score": "GPA, CGPA, percentage, or class as written (e.g. '3.8/4.0', '8.5/10', '85%', 'First Class Honours')",
+      "highlights": "Relevant coursework, honors, thesis title, dean's list, scholarships — join with newlines"
+    }
+  ],
+  "work_experience": [
+    {
+      "company": "Company/organization name",
+      "role_title": "Exact job title (e.g. 'Software Engineer Intern', 'Senior Backend Developer')",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD or 'present'",
+      "description": "ALL bullet points and responsibilities, joined with newlines (\\n). Capture EVERY bullet — do NOT skip or summarize any.",
+      "tech_stack": ["Individual", "technology", "names", "extracted", "from", "the", "entry"]
+    }
+  ],
+  "projects": [
+    {
+      "title": "Project name/title",
+      "description": "Full project description — ALL bullet points joined with newlines (\\n)",
+      "tech_stack": ["Individual", "technology", "names"],
+      "github_url": "GitHub/source code URL if present",
+      "live_url": "Deployed/live/demo URL if present",
+      "highlights": "Key achievements, metrics, or impact statements from the project"
+    }
+  ],
+  "skills": [
+    {
+      "name": "Individual skill name (one per entry, e.g. 'Python' not 'Python, Java')",
+      "category": "One of: language|framework|cloud|devops|ml|database|tool|soft_skill"
+    }
+  ],
+  "certifications": [
+    {
+      "title": "Certification name",
+      "issuer": "Issuing organization (e.g. 'AWS', 'Google', 'Coursera')",
+      "date": "YYYY-MM-DD when issued or earned",
+      "url": "Credential verification URL if present"
+    }
+  ]
 }
+
+CATEGORY RULES FOR SKILLS:
+- language: Programming/scripting languages (Python, Java, C++, JavaScript, SQL, etc.)
+- framework: Libraries and frameworks (React, Django, Spring Boot, TensorFlow, etc.)
+- cloud: Cloud platforms and services (AWS, GCP, Azure, S3, EC2, Lambda, etc.)
+- devops: DevOps and infrastructure tools (Docker, Kubernetes, Jenkins, Terraform, CI/CD, etc.)
+- ml: Machine learning and AI specific (PyTorch, scikit-learn, NLP, Computer Vision, etc.)
+- database: Databases and data stores (PostgreSQL, MongoDB, Redis, Elasticsearch, etc.)
+- tool: Developer tools, IDEs, version control (Git, VS Code, Jira, Postman, etc.)
+- soft_skill: Non-technical skills (Leadership, Agile, Communication, etc.)
 """
 
 
