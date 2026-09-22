@@ -1,0 +1,1 @@
+- also store target roles of what user wants to become, taget companies etc.

@@ -1,0 +1,3 @@
+# Optional Phase 2 URL ingestion dependencies.
+httpx>=0.27
+trafilatura>=1.12
