@@ -1,7 +1,7 @@
 """Job-description ingestion and best-effort URL extraction."""
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.llm.gemini_client import embed_text, generate_json
@@ -113,3 +113,88 @@ def list_job_descriptions(session: Session, *, user_id: uuid.UUID) -> list[JobDe
         .where(JobDescription.user_id == user_id)
         .order_by(JobDescription.created_at.desc())
     ).scalars().all())
+
+# ── Read-side helpers for the Job Descriptions UI ─────────────────────────────
+# Raw SQL rather than the ORM: these join across job_description, role,
+# match_result and resume_version, and the UI wants flat rows, not graphs.
+
+def list_job_description_summaries(session: Session, *, user_id: uuid.UUID) -> list[dict]:
+    """One row per stored JD, with its latest match verdict and resume count."""
+    rows = session.execute(
+        text("""
+            SELECT jd.id, jd.company, jd.role_title, jd.source_url, jd.created_at,
+                   r.canonical_name        AS canonical_role,
+                   mr.score, mr.verdict, mr.created_at AS matched_at,
+                   COALESCE(rc.n, 0)       AS resume_count,
+                   length(jd.raw_text)     AS raw_length
+            FROM job_description jd
+            LEFT JOIN role r ON r.id = jd.role_id
+            LEFT JOIN LATERAL (
+                SELECT score, verdict, created_at FROM match_result
+                WHERE jd_id = jd.id AND user_id = :uid
+                ORDER BY created_at DESC LIMIT 1
+            ) mr ON true
+            LEFT JOIN LATERAL (
+                SELECT count(*) AS n FROM resume_version
+                WHERE jd_id = jd.id AND user_id = :uid
+            ) rc ON true
+            WHERE jd.user_id = :uid
+            ORDER BY jd.created_at DESC
+        """),
+        {"uid": user_id},
+    ).mappings().fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_job_description_detail(session: Session, *, user_id: uuid.UUID,
+                               jd_id: uuid.UUID) -> dict | None:
+    """Everything stored about one JD: what was parsed out of it, the skill
+    mentions that drive matching, the latest match result, and the raw text."""
+    row = session.execute(
+        text("""
+            SELECT jd.id, jd.company, jd.role_title, jd.source_url, jd.created_at,
+                   jd.parsed_requirements, jd.raw_text, jd.role_id,
+                   r.canonical_name AS canonical_role, r.category AS role_category
+            FROM job_description jd
+            LEFT JOIN role r ON r.id = jd.role_id
+            WHERE jd.id = :id AND jd.user_id = :uid
+        """),
+        {"id": jd_id, "uid": user_id},
+    ).mappings().first()
+    if not row:
+        return None
+
+    mentions = session.execute(
+        text("""
+            SELECT skill_name, weight, is_required FROM extracted_skill_mention
+            WHERE jd_id = :id
+            ORDER BY is_required DESC, weight DESC, skill_name
+        """),
+        {"id": jd_id},
+    ).mappings().fetchall()
+
+    match = session.execute(
+        text("""
+            SELECT score, verdict, matched_skills, missing_skills, surplus_skills, created_at
+            FROM match_result WHERE jd_id = :id AND user_id = :uid
+            ORDER BY created_at DESC LIMIT 1
+        """),
+        {"id": jd_id, "uid": user_id},
+    ).mappings().first()
+
+    return {
+        **dict(row),
+        "parsed_requirements": row["parsed_requirements"] or {},
+        "skill_mentions": [dict(m) for m in mentions],
+        "match": dict(match) if match else None,
+    }
+
+
+def delete_job_description(session: Session, *, user_id: uuid.UUID, jd_id: uuid.UUID) -> bool:
+    """Remove a JD. Skill mentions, match results and resume versions cascade."""
+    result = session.execute(
+        text("DELETE FROM job_description WHERE id = :id AND user_id = :uid"),
+        {"id": jd_id, "uid": user_id},
+    )
+    session.commit()
+    return result.rowcount > 0

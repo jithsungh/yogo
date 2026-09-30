@@ -1,1 +1,2 @@
 - also store target roles of what user wants to become, taget companies etc.
+- using different gemini models for different purposes based on ratelimits and availability

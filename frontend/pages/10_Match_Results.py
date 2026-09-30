@@ -24,39 +24,51 @@ if not user_id:
 
 with get_session() as session:
     job_descriptions = list_job_descriptions(session, user_id=user_id)
+    # Eagerly extract attributes while session is open to avoid DetachedInstanceError
+    jd_data = []
+    for jd in job_descriptions:
+        result = get_latest_match(session, user_id=user_id, jd_id=jd.id)
+        jd_data.append({
+            "id": jd.id,
+            "company": jd.company or "(unknown)",
+            "role": jd.role_title or "(unknown)",
+            "role_id": jd.role_id,
+            "role_status": "Resolved" if jd.role_id else "Needs review",
+            "score": f"{result.score:.0%}" if result else "-",
+            "verdict": result.verdict if result else "Not scored",
+            "result": result,
+        })
 
-if not job_descriptions:
+if not jd_data:
     st.info("No job descriptions yet. Add one from the sidebar.")
     st.stop()
 
-rows = []
-for jd in job_descriptions:
-    with get_session() as session:
-        result = get_latest_match(session, user_id=user_id, jd_id=jd.id)
-    rows.append({
-        "id": jd.id,
-        "company": jd.company or "(unknown)",
-        "role": jd.role_title or "(unknown)",
-        "role_status": "Resolved" if jd.role_id else "Needs review",
-        "score": f"{result.score:.0%}" if result else "-",
-        "verdict": result.verdict if result else "Not scored",
-    })
 st.dataframe(
-    [{key: value for key, value in row.items() if key != "id"} for row in rows],
-    use_container_width=True,
+    [{key: value for key, value in row.items() if key not in ("id", "role_id", "result")} for row in jd_data],
+    width="stretch",
     hide_index=True,
 )
 
-labels = [f"{row['company']} - {row['role']}" for row in rows]
-selected_index = st.selectbox("Review job description", range(len(rows)), format_func=lambda index: labels[index])
-selected = rows[selected_index]
-jd = job_descriptions[selected_index]
+labels = [f"{row['company']} - {row['role']}" for row in jd_data]
+selected_index = st.selectbox("Review job description", range(len(jd_data)), format_func=lambda index: labels[index])
+selected = jd_data[selected_index]
 
 with get_session() as session:
-    result = get_latest_match(session, user_id=user_id, jd_id=jd.id)
+    result_obj = get_latest_match(session, user_id=user_id, jd_id=selected["id"])
     roles = list_roles(session)
+    # Eagerly extract result attributes while session is open
+    if result_obj:
+        result = {
+            "score": result_obj.score,
+            "verdict": result_obj.verdict,
+            "matched_skills": result_obj.matched_skills or [],
+            "missing_skills": result_obj.missing_skills or [],
+            "surplus_skills": result_obj.surplus_skills or [],
+        }
+    else:
+        result = None
 
-if not jd.role_id and roles:
+if not selected["role_id"] and roles:
     role_labels = {role_id: f"{canonical_name} ({category})" for role_id, canonical_name, category in roles}
     chosen_role = st.selectbox("Assign canonical role", list(role_labels), format_func=role_labels.get)
     if st.button("Save role assignment"):
@@ -64,17 +76,17 @@ if not jd.role_id and roles:
             assign_role(
                 session,
                 user_id=user_id,
-                jd_id=jd.id,
+                jd_id=selected["id"],
                 role_id=chosen_role,
-                raw_title=jd.role_title,
+                raw_title=selected["role"],
             )
         st.success("Role assignment saved.")
         st.rerun()
 
 col1, col2 = st.columns([1, 3])
 if result:
-    col1.metric("Score", f"{result.score:.0%}")
-    col2.subheader(f"Verdict: {result.verdict.title()}")
+    col1.metric("Score", f"{result['score']:.0%}")
+    col2.subheader(f"Verdict: {result['verdict'].title()}")
 else:
     col1.metric("Score", "Not scored")
     col2.info("Compute a match to see the fit breakdown.")
@@ -82,14 +94,14 @@ else:
 if st.button("Recompute match", type="primary"):
     with st.spinner("Comparing profile skills and semantic KB context..."):
         with get_session() as session:
-            compute_match(session, user_id=user_id, jd_id=jd.id)
+            compute_match(session, user_id=user_id, jd_id=selected["id"])
     st.rerun()
 
 if result:
     matched, missing, surplus = st.columns(3)
     matched.subheader("Matched")
-    matched.write(result.matched_skills or ["None"])
+    matched.write(result["matched_skills"] or ["None"])
     missing.subheader("Missing")
-    missing.write(result.missing_skills or ["None"])
+    missing.write(result["missing_skills"] or ["None"])
     surplus.subheader("Surplus")
-    surplus.write(result.surplus_skills or ["None"])
+    surplus.write(result["surplus_skills"] or ["None"])

@@ -30,13 +30,19 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
 
 def _retryable(exc: BaseException) -> bool:
     # Retrying a quota error only burns time and can worsen a per-minute limit.
-    return not _is_rate_limit_error(exc)
+    # GeminiRateLimitError is checked explicitly: it is what the wrappers below
+    # raise once they have recognised a quota response, and it carries none of
+    # the attributes _is_rate_limit_error() looks for, so without this it would
+    # be treated as a transient fault and retried - the exact thing the comment
+    # above says not to do.
+    return not (isinstance(exc, GeminiRateLimitError) or _is_rate_limit_error(exc))
 
 
 @retry(
     retry=retry_if_exception(_retryable),
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=1, max=8),
+    reraise=True,
 )
 def embed_text(text: str) -> Vector:
     """Always returns a pgvector.Vector, ready to bind directly into a query -
@@ -58,18 +64,19 @@ def embed_text(text: str) -> Vector:
     retry=retry_if_exception(_retryable),
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=1, max=8),
+    reraise=True,
 )
 def generate_text(prompt: str) -> str:
     try:
-        interaction = _client.interactions.create(
+        response = _client.models.generate_content(
             model=_settings.gemini_generation_model,
-            input=prompt,
+            contents=prompt,
         )
     except Exception as exc:
         if _is_rate_limit_error(exc):
             raise GeminiRateLimitError(_rate_limit_message(exc)) from exc
         raise
-    return interaction.output_text.strip()
+    return response.text.strip()
 
 
 def _rate_limit_message(exc: BaseException) -> str:

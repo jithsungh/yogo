@@ -192,9 +192,16 @@ CREATE TABLE resume_version (
     latex_source TEXT NOT NULL,
     pdf_path     TEXT,
     notes        TEXT,
+    -- Fingerprint of every input this resume was built from (KB rows, match
+    -- result, JD, template files, prompt version). Unchanged hash = the stored
+    -- PDF is still correct, so it is reused instead of regenerated.
+    content_hash TEXT,
+    pages        SMALLINT,
+    build_report JSONB,
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_resume_version_user ON resume_version(user_id);
+CREATE INDEX idx_resume_version_cache ON resume_version(user_id, jd_id, content_hash);
 CREATE INDEX idx_resume_version_jd ON resume_version(jd_id);
 
 -- ---------------- Q&A Answer Bank ----------------

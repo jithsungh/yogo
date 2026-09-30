@@ -40,6 +40,10 @@ httpx>=0.27                # async-capable HTTP client for GitHub API
 
 # ---------------- Frontend (Phase 1) ----------------
 streamlit>=1.37
+pypdfium2>=4.30            # rasterizes the generated PDF for the in-app preview.
+# ^ Chromium browsers block <iframe src="data:application/pdf;...">, and
+#   st.pdf needs the streamlit-pdf component, which does not load against
+#   current Streamlit. Rendering pages to PNG server-side avoids both.
 
 # ---------------- Dev / testing ----------------
 pytest>=8.2

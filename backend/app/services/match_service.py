@@ -8,11 +8,13 @@ from app.config import get_settings
 from app.llm.gemini_client import embed_text
 from app.models.models import JobDescription, MatchResult
 
-STRING_MATCH_THRESHOLD = 0.60
-SEMANTIC_MATCH_THRESHOLD = 0.55
+STRING_MATCH_THRESHOLD = 0.45
+SEMANTIC_MATCH_THRESHOLD = 0.65
 
 
 def compute_match(session: Session, *, user_id: uuid.UUID, jd_id: uuid.UUID) -> dict:
+    jd_id = uuid.UUID(str(jd_id))
+    user_id = uuid.UUID(str(user_id))
     jd = session.get(JobDescription, jd_id)
     if jd is None or jd.user_id != user_id:
         raise ValueError(f"Job description {jd_id} not found")
@@ -38,6 +40,13 @@ def compute_match(session: Session, *, user_id: uuid.UUID, jd_id: uuid.UUID) -> 
     surplus = _find_surplus_skills(session, user_id, jd_skill_names)
     required = [(name, weight) for name, weight, is_required in mentions if is_required]
     optional = [(name, weight) for name, weight, is_required in mentions if not is_required]
+
+    # If Gemini classified everything as nice-to-have, promote them all to
+    # required so the score isn't artificially capped at 10%.
+    if not required and optional:
+        required = optional
+        optional = []
+
     required_total = sum(weight for _, weight in required) or 1.0
     required_matched = sum(weight for name, weight in required if name in matched)
     optional_total = sum(weight for _, weight in optional) or 1.0

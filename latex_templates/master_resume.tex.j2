@@ -1,0 +1,102 @@
+### ------------------------------------------------------------------
+  Jinja delimiters are remapped (<< >> variables, ## blocks, and the
+  marker pair around this note for comments) because LaTeX owns { } and %.
+  See resume_renderer._make_env().
+
+  This note is ONE comment block. The marker both opens and closes a
+  comment, so repeating it per line would alternate open/close and leak
+  every other line into the rendered .tex.
+
+  Every value reaching this template is already LaTeX-escaped by
+  resume_tailor. Nothing here escapes anything; nothing here should.
+
+  Dict keys are read as row.items_text, never row.items: Jinja resolves
+  attributes before keys, so a key named 'items' renders the bound
+  dict.items method instead of its value.
+------------------------------------------------------------------ ###
+<< preamble >>
+\begin{document}
+## macro render_header(profile) ##
+\resumeheader{<< profile.full_name >>}{%
+## for item in profile.contact_items ##
+  << item.label >>: ## if item.url ##\href{<< item.url >>}{<< item.text >>}## else ##<< item.text >>## endif ## ## if not loop.last ##\quad## endif ##
+## endfor ##
+}{%
+## for item in profile.link_items ##
+  << item.label >>: \href{<< item.url >>}{<< item.text >>} ## if not loop.last ##\quad## endif ##
+## endfor ##
+}
+## endmacro ##
+## macro render_summary(summary) ##
+\section*{Summary}
+<< summary >>
+## endmacro ##
+## macro render_skills(skills_sections) ##
+\section*{Skills}
+## for row in skills_sections ##
+\skillrow{<< row.label >>:}{<< row.items_text >>}
+## endfor ##
+## endmacro ##
+## macro render_experience(experiences) ##
+\section*{Work Experience}
+## for exp in experiences ##
+\expentry{<< exp.role_title >>}{<< exp.company >>}{<< exp.meta >>}
+## if exp.bullets ##
+\begin{rbullets}
+## for bullet in exp.bullets ##
+  \item << bullet >>
+## endfor ##
+\end{rbullets}
+## endif ##
+## if not loop.last ##
+\entrygap
+## endif ##
+## endfor ##
+## endmacro ##
+## macro render_projects(projects) ##
+\section*{Projects}
+## for proj in projects ##
+\projentry{<< proj.title >>}{<< proj.tech >>}{<< proj.link_text >>}{<< proj.link_url >>}
+## if proj.bullets ##
+\begin{rbullets}
+## for bullet in proj.bullets ##
+  \item << bullet >>
+## endfor ##
+\end{rbullets}
+## endif ##
+## if not loop.last ##
+\entrygap
+## endif ##
+## endfor ##
+## endmacro ##
+## macro render_education(education) ##
+\section*{Education}
+\begin{tabular*}{\textwidth}{@{}l@{\extracolsep{\fill}}lll@{}}
+## for edu in education ##
+\textbf{<< edu.institution >>} & << edu.degree >> & << edu.date_range >> & << edu.score >> ## if not loop.last ##\\[0.3em]## endif ##
+## endfor ##
+\end{tabular*}
+## endmacro ##
+## macro render_certifications(certifications) ##
+\section*{Awards \& Certifications}
+## for cert in certifications ##
+\certentry{<< cert.text >>}{<< cert.link_text >>}{<< cert.link_url >>}
+## endfor ##
+## endmacro ##
+<< render_header(profile) >>
+## for section in section_order ##
+## if section == 'summary' and summary ##
+<< render_summary(summary) >>
+## elif section == 'skills' and skills_sections ##
+<< render_skills(skills_sections) >>
+## elif section == 'experience' and experiences ##
+<< render_experience(experiences) >>
+## elif section == 'projects' and projects ##
+<< render_projects(projects) >>
+## elif section == 'education' and education ##
+<< render_education(education) >>
+## elif section == 'certifications' and certifications ##
+<< render_certifications(certifications) >>
+## endif ##
+## endfor ##
+\end{document}

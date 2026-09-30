@@ -1,0 +1,194 @@
+%% careeros.cls — resume class derived from the user's hand-tuned base_resume.tex
+%%
+%% Design rule: the VISUAL output must match data/resumes/base_resume.tex
+%% (Helvetica sans, a4paper, 0.6in side margins, uppercase bold section
+%% headings with a full-width rule). What changed from that file is only the
+%% *mechanism*: every two-column row (title left / meta right) is built from
+%% two fixed-width minipages instead of a bare \hfill, and bullets are a real
+%% itemize instead of literal "- " prefixes.
+%%
+%% Why that matters: a bare "\textbf{Long Title} \hfill \textbf{[long stack]}"
+%% silently overflows the right margin as soon as the two strings exceed
+%% \textwidth, and a "- " bullet that wraps puts its second line hard against
+%% the left margin instead of hanging under the text. Both are invisible in a
+%% one-off hand-written resume and unavoidable in a generated one, where the
+%% strings change with every JD. The minipages wrap instead of overflowing and
+%% the itemize gives a proper hanging indent, so alignment holds for any input.
+
+
+\documentclass[a4paper,10pt]{article}
+
+% ── Page geometry (matches base_resume.tex) ───────────────────────────────────
+\usepackage[left=0.6in, right=0.6in, top=0.5in, bottom=0.6in]{geometry}
+
+% ── Font: Helvetica clone as the default family ───────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype}
+
+% ── Links ─────────────────────────────────────────────────────────────────────
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue, pdfborder={0 0 0}}
+\usepackage{url}
+\urlstyle{same}
+
+% ── Layout helpers ────────────────────────────────────────────────────────────
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{array}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\tabcolsep}{0pt}
+
+% Prefer a slightly loose line over an overfull box poking into the margin.
+% Every overfull hbox is a visible alignment defect, so we trade tight spacing
+% for a guaranteed-clean right edge; the compiler still reports any box that
+% survives this, and the build treats that report as a failure signal.
+\tolerance=2000
+\emergencystretch=2em
+\hbadness=10000
+
+% ── Section headings (matches base_resume.tex) ────────────────────────────────
+\titleformat{\section}{\large\bfseries\uppercase}{}{0em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{0.85em}{0.35em}
+
+% ── Two-column row: content left, meta right, both wrap ───────────────────────
+% #1 left block, #2 right block. Widths sum to 0.98 so \hfill always has slack.
+\newcommand{\tworow}[2]{%
+  \noindent%
+  \begin{minipage}[t]{0.615\textwidth}\raggedright #1\end{minipage}%
+  \hfill%
+  \begin{minipage}[t]{0.365\textwidth}\raggedleft #2\end{minipage}%
+  \par%
+}
+
+% ── Header ────────────────────────────────────────────────────────────────────
+% \resumeheader{Name}{contact line}{links line}
+\newcommand{\resumeheader}[3]{%
+  \begin{center}
+    {\LARGE \textbf{#1}} \\[0.5em]
+    \small #2 \\[0.3em]
+    \small #3
+  \end{center}
+}
+
+% ── Experience entry ──────────────────────────────────────────────────────────
+% \expentry{Role}{Company}{Dates | Location} — empty #3 suppresses the line,
+% so an entry with no dates recorded does not leave a blank row behind.
+\newcommand{\expentry}[3]{%
+  \tworow{\textbf{#1}}{#2}%
+  \ifx\relax#3\relax\else\textit{\small #3}\par\fi
+}
+
+% ── Project entry ─────────────────────────────────────────────────────────────
+% \projentry{Title}{Tech stack}{link text}{link url}
+% An empty #3 suppresses the URL line entirely.
+\newcommand{\projentry}[4]{%
+  \tworow{\textbf{#1}}{\textbf{\small[ #2 ]}}%
+  \ifx\relax#3\relax\else\vspace{-0.15em}\textit{\small\href{#4}{#3}}\par\fi
+}
+
+% ── Bullet list ───────────────────────────────────────────────────────────────
+\newenvironment{rbullets}{%
+  \vspace{0.12em}%
+  \begin{itemize}[leftmargin=1.1em, labelsep=0.4em, label=\textbullet,
+                  itemsep=0.12em, topsep=0.08em, parsep=0pt, partopsep=0pt]%
+}{%
+  \end{itemize}%
+}
+
+% Vertical gap between two entries in the same section.
+\newcommand{\entrygap}{\vspace{0.55em}}
+
+% ── Skills row ────────────────────────────────────────────────────────────────
+% \skillrow{Category}{comma-separated list} — wrapped list hangs under itself
+% rather than falling back to the left margin.
+\newcommand{\skillrow}[2]{%
+  \noindent%
+  \begin{minipage}[t]{0.27\textwidth}\raggedright\textbf{#1}\end{minipage}%
+  \begin{minipage}[t]{0.73\textwidth}\raggedright #2\end{minipage}%
+  \par\vspace{0.18em}%
+}
+
+% ── Certification / award line ────────────────────────────────────────────────
+% \certentry{description}{link text}{link url} — empty #2 suppresses the link.
+% Wider left column than \tworow: the description is a full title plus a year,
+% while the right column only ever holds a short shortened-URL label.
+\newcommand{\certentry}[3]{%
+  \noindent%
+  \begin{minipage}[t]{0.80\textwidth}\raggedright #1\end{minipage}%
+  \hfill%
+  \begin{minipage}[t]{0.18\textwidth}\raggedleft
+    \ifx\relax#2\relax\else\small\href{#3}{#2}\fi
+  \end{minipage}%
+  \par\vspace{0.2em}%
+}
+\begin{document}
+\resumeheader{JITHSUNGH SAI VALLABHANENI}{%
+  Phone: +91 7032909135 \quad  Email: \href{mailto:jithsungh@gmail.com}{jithsungh@gmail.com} \quad  Location: Hyderabad, India }{%
+  LinkedIn: \href{https://linkedin.com/in/jithsung}{linkedin.com/in/jithsung} \quad  GitHub: \href{https://github.com/jithsungh}{github.com/jithsungh} \quad  Portfolio: \href{https://jithsungh.vercel.app}{jithsungh.vercel.app} }
+
+\section*{Summary}
+Software engineer applying for the SDE-I role, experienced in building scalable backend services and distributed system observability.
+
+\section*{Skills}
+\skillrow{Programming Languages:}{JavaScript, TypeScript, Go, Algorithms, Data Structures, Python, HTML, Java, SQL}
+\skillrow{Frameworks \& Libraries:}{Node.js, React.js, Express.js, Bootstrap, CSS, Material UI, Tailwind CSS}
+\skillrow{Databases:}{PostgreSQL, MongoDB, ChromaDB, Firebase Firestore, MySQL, Vector Databases}
+\skillrow{Cloud \& DevOps:}{AWS, Docker, Git, Firebase, GitHub, GitLab, Kubernetes}
+\skillrow{AI/ML:}{CNNs, Deep Learning, LangChain, Machine Learning, NLP, RAG Systems}
+\skillrow{Tools \& Protocols:}{RESTful APIs, Figma, WebSockets}
+\skillrow{Other Skills:}{Effective Communication, Problem-Solving, Team Player}
+
+\section*{Work Experience}
+\expentry{Member of Technical Staff -- Site Reliability Engineer (Intern)}{TechMojo Solutions}{}
+\begin{rbullets}
+  \item Implemented tracing using Open Telemetry for Java, Go, JavaScript and Next JS.
+  \item Monitored system reliability, performance using observability tools, supporting incident resolution.
+  \item Gained hands-on experience with ELK Stack, Kafka, Prometheus, Grafana alerting.
+\end{rbullets}
+\entrygap
+\expentry{Research Internship}{SRM AP University, Amaravati}{}
+\begin{rbullets}
+  \item Conducted research on AI Brain Tumour Detector.
+  \item Developed and evaluated detection models.
+\end{rbullets}
+
+\section*{Projects}
+\projentry{ai-interviewer}{Python, TypeScript, JavaScript}{github.com/jithsungh/ai-interviewer}{https://github.com/jithsungh/ai-interviewer}
+\begin{rbullets}
+  \item Executes candidate submissions securely within dockerized, isolated sandbox environments.
+  \item Utilizes Qdrant vector search and LLM integration to power adaptive question generation.
+  \item Integrates advisory proctoring event logging and mandates human-in-the-loop review.
+\end{rbullets}
+\entrygap
+\projentry{Adaptive knowledge Chatbot -- RAG}{FastAPI, React, PostgreSQL, ChromaDB}{github.com/jithsungh/chatbot}{https://github.com/jithsungh/chatbot}
+\begin{rbullets}
+  \item Engineered a hybrid routing system that combines semantic embeddings with keyword-based matching.
+  \item Implemented semantic question deduplication and reduced redundant queries by generating summaries.
+  \item Implemented a Retrieval-Augmented Generation pipeline using ChromaDB to index and retrieve context.
+\end{rbullets}
+\entrygap
+\projentry{Newzzy -- Personalized News Feed}{MERN stack, Tailwind CSS, DaisyUI}{github.com/jithsungh/Newzzy}{https://github.com/jithsungh/Newzzy}
+\begin{rbullets}
+  \item Developed a feature-rich news aggregation and AI-powered recommendation platform with JWT authentication.
+  \item Implemented real-time news curation by integrating the NewsData.io API and keyword extraction.
+  \item Designed a decoupled architecture by deploying a React frontend on Vercel and Express servers.
+\end{rbullets}
+
+\section*{Education}
+\begin{tabular*}{\textwidth}{@{}l@{\extracolsep{\fill}}lll@{}}
+\textbf{SRM AP University, Amaravati} & B.Tech in Computer Science &  & CGPA: 9.18 \\[0.3em]\textbf{Narayana Junior College, Vijayawada} & Class XII (BIEAP) &  & Percentage: 91.80\% \\[0.3em]\textbf{CSKGTS, Vijayawada} & Class X (BSEAP) &  & Percentage: 99.83\% \end{tabular*}
+
+\section*{Awards \& Certifications}
+\certentry{\textbf{MongoDB Certified Associate Developer -- Global Certification} -- MongoDB}{[bit.ly/4nRHJ76]}{https://bit.ly/4nRHJ76}
+\certentry{\textbf{AWS Fundamentals} -- Coursera}{[bit.ly/3GQ9hJr]}{https://bit.ly/3GQ9hJr}
+\certentry{\textbf{Fundamentals of UI/UX Design} -- Coursera}{[bit.ly/4nSiW2R]}{https://bit.ly/4nSiW2R}
+\certentry{\textbf{University-Level Club Lead -- Professional Societies Club} -- SRM AP}{}{}
+
+\end{document}

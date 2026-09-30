@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     # ---------------- File storage ----------------
     resume_storage_dir: str = "./data/resumes"
+    tectonic_path: str = "tectonic"  # path to tectonic binary for LaTeX→PDF compilation
 
     # ---------------- Phase 1: single-user bootstrap ----------------
     default_user_id: str = ""  # UUID string, set after running create_default_user.py
