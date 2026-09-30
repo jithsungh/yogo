@@ -220,6 +220,11 @@ class _Settings:
     resume_storage_dir: str
     tectonic_path: str = "tectonic"
 
+    @property
+    def resume_storage_path(self):
+        from pathlib import Path
+        return Path(self.resume_storage_dir)
+
 
 @needs_tectonic
 def test_compiles_to_a_clean_single_page(source, tailored, tmp_path, monkeypatch):

@@ -93,7 +93,8 @@ with add_tab:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Stored
-# ══════════════════════════════════════════════════════════════════════════════with stored_tab:
+# ══════════════════════════════════════════════════════════════════════════════
+with stored_tab:
     with get_session() as session:
         summaries = list_job_description_summaries(session, user_id=user_id)
 

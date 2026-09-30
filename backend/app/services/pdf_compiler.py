@@ -66,7 +66,7 @@ def compile_to_pdf(latex_source: str, output_stem: str | None = None,
     clean them up.
     """
     settings = get_settings()
-    storage = Path(settings.resume_storage_dir)
+    storage = settings.resume_storage_path
     storage.mkdir(parents=True, exist_ok=True)
 
     stem = output_stem or str(uuid.uuid4())

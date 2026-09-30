@@ -60,7 +60,7 @@ def version_pdf_path(version_id, stored_path: str | None) -> Path | None:
     return path if path.exists() else None
 
 
-def compute_content_hash(source: dict) -> str:
+def compute_content_hash(source: dict, options: dict | None = None) -> str:
     """Fingerprint every input the resume derives from.
 
     Includes the template and class files and the prompt version, so a layout
@@ -71,6 +71,10 @@ def compute_content_hash(source: dict) -> str:
         "tailor_version": TAILOR_VERSION,
         "template": template_fingerprint(),
         "source": source,
+        # Build options change the output too: without max_pages here, asking
+        # for two pages returned the cached one-page resume, and a different
+        # project selection returned the previous selection's resume.
+        "options": options or {},
     }
     blob = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -120,6 +124,7 @@ def generate_and_save(
     notes: str | None = None,
     force: bool = False,
     max_pages: int = DEFAULT_MAX_PAGES,
+    project_ids: list | None = None,
 ) -> dict:
     """Full pipeline: fingerprint -> reuse or (tailor -> render -> fit -> compile) -> save.
 
@@ -127,7 +132,8 @@ def generate_and_save(
     reason to do that is to get a different draft out of the model.
     """
     source = collect_source_data(session, user_id=user_id, jd_id=jd_id)
-    content_hash = compute_content_hash(source)
+    selection = [str(i) for i in project_ids] if project_ids else None
+    content_hash = compute_content_hash(source, {"max_pages": max_pages, "project_ids": selection})
 
     if not force:
         cached = find_reusable_version(
@@ -137,7 +143,8 @@ def generate_and_save(
             return cached
 
     data, report = build_tailored_resume_data(
-        session, user_id=user_id, jd_id=jd_id, source=source, max_projects=MAX_PROJECTS
+        session, user_id=user_id, jd_id=jd_id, source=source, max_projects=MAX_PROJECTS,
+        project_ids=selection,
     )
 
     # The id is minted before compiling so it can name the output files. A

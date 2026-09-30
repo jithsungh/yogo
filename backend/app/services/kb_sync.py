@@ -21,7 +21,25 @@ def sync_kb_chunk(
     content_type: str,
     text_for_embedding: str,
     role_tags: list[uuid.UUID] | None = None,
-) -> None:
+    force: bool = False,
+) -> bool:
+    """Upsert the chunk for one source row. Returns True if it re-embedded.
+
+    Skips the embedding call when the chunk already holds exactly this text:
+    editing a field that is not part of the embedding text (a project's
+    priority, a favourite flag, a URL) then costs no Gemini call, and saving a
+    form without changes costs nothing at all.
+    """
+    if not force:
+        existing = session.execute(
+            text("SELECT text_for_embedding, role_tags, content_type::text FROM kb_chunk "
+                 "WHERE source_table = :t AND source_id = :i"),
+            {"t": source_table, "i": source_id},
+        ).first()
+        if (existing and existing[0] == text_for_embedding
+                and list(existing[1] or []) == list(role_tags or [])
+                and existing[2] == content_type):
+            return False
     embedding = embed_text(text_for_embedding)
     session.execute(
         text("""
@@ -46,6 +64,7 @@ def sync_kb_chunk(
             "embedding": embedding,
         },
     )
+    return True
 
 
 def delete_kb_chunk(session: Session, *, source_table: str, source_id: uuid.UUID) -> None:

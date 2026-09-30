@@ -114,9 +114,19 @@ CREATE TABLE project (
     highlights  TEXT,
     source      resume_source NOT NULL DEFAULT 'manual',
     status      TEXT NOT NULL DEFAULT 'verified',  -- 'verified' | 'draft' - Tier1/Tier2 marker (e.g. unreviewed GitHub imports)
+    summary        TEXT,                               -- one-line pitch
+    role           TEXT,                               -- the candidate's part ("Solo", "Backend lead")
+    key_points     TEXT[] NOT NULL DEFAULT '{}',       -- detailed achievements (the evidence)
+    resume_bullets TEXT[] NOT NULL DEFAULT '{}',       -- short (<=108 char) resume-ready points, user-curated
+    start_date     DATE,
+    end_date       DATE,
+    priority       SMALLINT NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 5),  -- user score; boosts JD ranking
+    is_favourite   BOOLEAN NOT NULL DEFAULT false,     -- always offered first for resumes
+    repo_key       TEXT,                               -- normalized repo URL; import dedup identity
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX uq_project_user_repo ON project(user_id, repo_key) WHERE repo_key IS NOT NULL;
 CREATE INDEX idx_project_user ON project(user_id);
 CREATE INDEX idx_project_tech_gin ON project USING GIN (tech_stack);
 CREATE INDEX idx_project_status ON project(user_id, status);
@@ -152,6 +162,7 @@ CREATE TABLE job_description (
     role_title          TEXT,                       -- raw string as written in the JD
     role_id             UUID REFERENCES role(id),     -- resolved canonical role
     parsed_requirements JSONB NOT NULL DEFAULT '{}',
+    content_hash        TEXT,   -- sha256 of normalized raw_text; ingest dedup (see jd_service.jd_content_hash)
     embedding           VECTOR(768),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -160,6 +171,8 @@ CREATE INDEX idx_jd_role ON job_description(role_id);
 CREATE INDEX idx_jd_embedding_hnsw ON job_description USING hnsw (embedding vector_cosine_ops);
 
 -- what the skill heatmap aggregates over
+CREATE INDEX idx_jd_user_hash ON job_description(user_id, content_hash);
+
 CREATE TABLE extracted_skill_mention (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     jd_id       UUID NOT NULL REFERENCES job_description(id) ON DELETE CASCADE,
@@ -179,6 +192,8 @@ CREATE TABLE match_result (
     matched_skills TEXT[] NOT NULL DEFAULT '{}',
     missing_skills TEXT[] NOT NULL DEFAULT '{}',
     surplus_skills TEXT[] NOT NULL DEFAULT '{}',
+    algo_version   TEXT,      -- match_service.ALGO_VERSION that produced this row
+    inputs_hash    TEXT,      -- skills + requirements + thresholds; differs from current => stale
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_match_result_jd ON match_result(jd_id);
@@ -213,6 +228,8 @@ CREATE TABLE qa_question (
     question_text TEXT NOT NULL,
     category      qa_category NOT NULL DEFAULT 'reusable',
     embedding     VECTOR(768),
+    company       TEXT,        -- employer of a company_specific answer; survives JD deletion
+    kind          TEXT,        -- question kind at save time (background/behavioral/motivation/...)
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_qa_question_user ON qa_question(user_id);
@@ -221,13 +238,31 @@ CREATE INDEX idx_qa_question_jd ON qa_question(jd_id);
 CREATE INDEX idx_qa_question_role ON qa_question(role_id);
 CREATE INDEX idx_qa_question_embedding_hnsw ON qa_question USING hnsw (embedding vector_cosine_ops);
 
+-- Learned paraphrases: a Tier 3 suggestion the user confirmed as "the same
+-- question" stores its wording here, so that wording auto-fills next time.
+-- Needed because no similarity threshold separates paraphrases (0.66-0.90)
+-- from different questions on neighbouring topics (up to 0.64).
+CREATE TABLE qa_question_alias (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_id UUID NOT NULL REFERENCES qa_question(id) ON DELETE CASCADE,
+    alias_text  TEXT NOT NULL,
+    embedding   VECTOR(768) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (question_id, alias_text)
+);
+CREATE INDEX idx_qa_alias_question ON qa_question_alias(question_id);
+CREATE INDEX idx_qa_alias_embedding_hnsw ON qa_question_alias USING hnsw (embedding vector_cosine_ops);
+
 CREATE TABLE qa_answer (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     question_id UUID NOT NULL REFERENCES qa_question(id) ON DELETE CASCADE,
     answer_text TEXT NOT NULL,
     style       qa_style NOT NULL,
     status      qa_status NOT NULL DEFAULT 'draft',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    times_reused INTEGER NOT NULL DEFAULT 0,   -- bumped on each reuse for a new application (Phase 4 milestone signal)
+    last_used_at TIMESTAMPTZ
 );
 CREATE INDEX idx_qa_answer_question ON qa_answer(question_id);
 CREATE INDEX idx_qa_answer_status ON qa_answer(status);

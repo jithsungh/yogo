@@ -16,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -187,9 +188,18 @@ class Project(Base):
     tech_stack = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
     github_url = Column(Text)
     live_url = Column(Text)
-    highlights = Column(Text)
+    highlights = Column(Text)            # legacy; superseded by key_points
     source = Column(resume_source_enum, nullable=False, server_default=text("'manual'"))
     status = Column(Text, nullable=False, server_default=text("'verified'"))
+    summary = Column(Text)
+    role = Column(Text)
+    key_points = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    resume_bullets = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    start_date = Column(Date)
+    end_date = Column(Date)
+    priority = Column(SmallInteger, nullable=False, server_default=text("0"))
+    is_favourite = Column(Boolean, nullable=False, server_default=text("false"))
+    repo_key = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -238,6 +248,7 @@ class JobDescription(Base):
     company = Column(Text)
     role_title = Column(Text)
     role_id = Column(UUID(as_uuid=True), ForeignKey("role.id"), nullable=True)
+    content_hash = Column(Text)
     parsed_requirements = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     embedding = Column(Vector(768))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
@@ -271,6 +282,8 @@ class MatchResult(Base):
     verdict = Column(match_verdict_enum, nullable=False)
     matched_skills = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
     missing_skills = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    algo_version = Column(Text)
+    inputs_hash = Column(Text)
     surplus_skills = Column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -309,12 +322,29 @@ class QAQuestion(Base):
     question_text = Column(Text, nullable=False)
     category = Column(qa_category_enum, nullable=False, server_default=text("'reusable'"))
     embedding = Column(Vector(768))
+    company = Column(Text)   # employer of a company_specific answer; survives JD deletion
+    kind = Column(Text)      # qa_intake KIND_* at save time
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     user = relationship("User", back_populates="qa_questions")
     job_description = relationship("JobDescription")
     role = relationship("Role")
     answers = relationship("QAAnswer", back_populates="question", cascade="all, delete-orphan")
+    aliases = relationship("QAQuestionAlias", back_populates="question", cascade="all, delete-orphan")
+
+
+class QAQuestionAlias(Base):
+    """A confirmed paraphrase of a banked question (see migration e3b8f6d21a47)."""
+    __tablename__ = "qa_question_alias"
+    __table_args__ = (UniqueConstraint("question_id", "alias_text"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    question_id = Column(UUID(as_uuid=True), ForeignKey("qa_question.id", ondelete="CASCADE"), nullable=False)
+    alias_text = Column(Text, nullable=False)
+    embedding = Column(Vector(768), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    question = relationship("QAQuestion", back_populates="aliases")
 
 
 class QAAnswer(Base):
@@ -326,6 +356,9 @@ class QAAnswer(Base):
     style = Column(qa_style_enum, nullable=False)
     status = Column(qa_status_enum, nullable=False, server_default=text("'draft'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    times_reused = Column(Integer, nullable=False, server_default=text("0"))
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     question = relationship("QAQuestion", back_populates="answers")
 

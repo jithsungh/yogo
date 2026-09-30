@@ -68,8 +68,39 @@ class Settings(BaseSettings):
     match_strong_threshold: float = 0.70
     match_stretch_threshold: float = 0.45
 
+    # ---------------- Phase 4: Q&A answer bank ----------------
+    # Cosine similarity between a new question and a banked one (or one of its
+    # learned aliases). Measured on gemini-embedding-001 at 768 dims, default
+    # task type: paraphrases score 0.66-0.90, DIFFERENT questions on
+    # neighbouring topics up to 0.64. Auto-fill stays well above the latter;
+    # paraphrases below it are suggested, and confirming one stores it as an
+    # alias so that wording auto-fills from then on (qa_question_alias).
+    # Do not switch embed_text to task_type=SEMANTIC_SIMILARITY for this: it
+    # lifts paraphrases to 0.85-0.95 but different questions to 0.74-0.86,
+    # which is worse separation ("notice period" vs "salary" = 0.84).
+    qa_auto_resolve_threshold: float = 0.82   # reuse silently, no Gemini call
+    qa_suggest_threshold: float = 0.65        # offer, but the user confirms
+    # Personal facts (salary, notice period, visa) auto-fill only on a
+    # near-exact match or a confirmed alias: "current CTC" vs "expected CTC"
+    # embed at 0.90, and filling one with the other ships a wrong number.
+    qa_fact_exact_threshold: float = 0.97
+    # Floor on the best KB match before generation is even attempted. This is
+    # deliberately low: measured on the real KB, answerable and unanswerable
+    # questions BOTH score 0.46-0.65, so similarity cannot tell them apart.
+    # Question kind (qa_intake) and the model's own self-report do that job;
+    # this only catches the case where the KB is empty or unrelated.
+    qa_min_context_similarity: float = 0.40
+
     # ---------------- File storage ----------------
     resume_storage_dir: str = "./data/resumes"
+
+    @property
+    def resume_storage_path(self) -> Path:
+        """resume_storage_dir resolved against the repo root, not the process's
+        working directory - Streamlit started from frontend/ and a script run
+        from backend/ used to write PDFs to two different places."""
+        p = Path(self.resume_storage_dir)
+        return p if p.is_absolute() else (PROJECT_ROOT / p).resolve()
     tectonic_path: str = "tectonic"  # path to tectonic binary for LaTeX→PDF compilation
 
     # ---------------- Phase 1: single-user bootstrap ----------------

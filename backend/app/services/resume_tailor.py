@@ -39,7 +39,7 @@ from app.services.resume_layout import (
 
 # Bump when the prompt or assembly logic changes in a way that should
 # invalidate previously cached resumes. Folded into the resume cache key.
-TAILOR_VERSION = "3.1"
+TAILOR_VERSION = "3.2"
 
 MAX_PROJECTS = 4          # how many projects land on the page
 PROJECT_CANDIDATES = 8    # how many the model gets to choose among
@@ -95,6 +95,7 @@ def build_tailored_resume_data(
     jd_id: uuid.UUID,
     source: dict | None = None,
     max_projects: int = MAX_PROJECTS,
+    project_ids: list | None = None,
 ) -> tuple[dict, dict]:
     """Return (render_data, report).
 
@@ -102,11 +103,32 @@ def build_tailored_resume_data(
     already LaTeX-escaped. `report` carries what the UI needs to show about
     how the resume was built - which projects were chosen and why, and any
     bullet that still overflows its line.
-    """
-    src = source or collect_source_data(session, user_id=user_id, jd_id=jd_id)
 
-    jd_terms = _jd_term_weights(src["jd"]["requirements"], src["match_result"])
-    candidates = _rank_projects(src["projects"], jd_terms)[:PROJECT_CANDIDATES]
+    project_ids: the user's own choice of projects, in the order they should
+    appear. When given, the model rewrites bullets for exactly those and does
+    not select, drop or reorder - choosing projects is the user's call. When
+    omitted, project_ranking picks the candidates and the model chooses among
+    them.
+    """
+    from app.services.project_ranking import rank_projects_for_jd
+
+    src = source or collect_source_data(session, user_id=user_id, jd_id=jd_id)
+    by_id = {p["id"]: p for p in src["projects"]}
+    ranking = {str(r.project_id): r for r in rank_projects_for_jd(session, user_id=user_id, jd_id=jd_id)}
+
+    if project_ids:
+        chosen = [str(i) for i in project_ids if str(i) in by_id]
+        if not chosen:
+            raise ValueError("None of the selected projects exist (or they are unverified drafts).")
+        candidates = [by_id[i] for i in chosen]
+        fixed = True
+        max_projects = len(candidates)
+    else:
+        ordered = sorted(src["projects"], key=lambda p: -(ranking[p["id"]].score if p["id"] in ranking else 0))
+        candidates = ordered[:PROJECT_CANDIDATES]
+        fixed = False
+    for c in candidates:
+        c["prefilter_score"] = round(ranking[c["id"]].score, 3) if c["id"] in ranking else None
 
     tailored = _tailor_with_gemini(
         experiences=src["experiences"],
@@ -116,9 +138,11 @@ def build_tailored_resume_data(
         jd=src["jd"],
         profile=src["profile"],
         max_projects=max_projects,
+        fixed_selection=fixed,
     )
 
     render_data, report = _assemble(src, tailored, max_projects=max_projects)
+    report["selection"] = "user" if fixed else "automatic"
     return render_data, report
 
 
@@ -345,7 +369,7 @@ SKILLS ON FILE (you may reorder these; you may NOT add to them):
 WORK EXPERIENCE - keep every entry, rewrite its bullets:
 {experience_source}
 
-PROJECT CANDIDATES - choose the best {max_projects} for THIS job:
+PROJECTS - {project_instruction}
 {project_source}
 
 ================================================================================
@@ -382,6 +406,10 @@ Return ONLY raw JSON. No markdown fences, no commentary before or after.
 Return exactly {max_experience_bullets} bullets or fewer per experience entry,
 and exactly {max_project_bullets} or fewer per project. Return exactly
 {max_projects} entries in selected_projects, ranked 1 first.
+
+Where a project lists APPROVED RESUME BULLETS, the candidate wrote and approved
+those lines for resumes. Prefer them VERBATIM, choosing and ordering the ones
+most relevant to this job; rephrase one only if it is over the length limit.
 """
 
 
@@ -410,6 +438,7 @@ def _tailor_with_gemini(
     jd: dict,
     profile: dict,
     max_projects: int,
+    fixed_selection: bool = False,
 ) -> dict:
     exp_source = "\n\n".join(
         f"[id: {e['id']}] {e['role_title']} — {e['company']}"
@@ -418,12 +447,28 @@ def _tailor_with_gemini(
         for e in experiences
     ) or "(none on file)"
 
-    proj_source = "\n\n".join(
-        f"[id: {p['id']}] {p['title']}\n"
-        f"    stack: {', '.join(p['tech_stack']) or '(not recorded)'}\n"
-        + "\n".join(f"    - {b}" for b in p["raw_bullets"])
-        for p in candidates
-    ) or "(none on file)"
+    def _project_block(p: dict) -> str:
+        lines = [f"[id: {p['id']}] {p['title']}"]
+        if p.get("summary"):
+            lines.append(f"    summary: {p['summary']}")
+        if p.get("role"):
+            lines.append(f"    candidate's role: {p['role']}")
+        lines.append(f"    stack: {', '.join(p['tech_stack']) or '(not recorded)'}")
+        if p.get("approved_bullets"):
+            lines.append("    APPROVED RESUME BULLETS:")
+            lines += [f"      * {b}" for b in p["approved_bullets"]]
+            lines.append("    other evidence:")
+        lines += [f"    - {b}" for b in p["raw_bullets"]]
+        return "\n".join(lines)
+
+    proj_source = "\n\n".join(_project_block(p) for p in candidates) or "(none on file)"
+    project_instruction = (
+        f"the candidate CHOSE these {len(candidates)} projects for this job. Include ALL of "
+        f"them in selected_projects, in exactly this order (rank 1 = first listed). Do not "
+        f"drop, add or reorder any."
+        if fixed_selection else
+        f"choose the best {max_projects} for THIS job:"
+    )
 
     reqs = jd.get("requirements") or {}
     responsibilities = "\n".join(f"  - {r}" for r in (reqs.get("responsibilities") or [])[:8]) \
@@ -447,6 +492,7 @@ def _tailor_with_gemini(
         skill_inventory=_format_skill_list(skills) or "  (none on file)",
         experience_source=exp_source,
         project_source=proj_source,
+        project_instruction=project_instruction,
         max_projects=max_projects,
         max_experience_bullets=MAX_EXPERIENCE_BULLETS,
         max_project_bullets=MAX_PROJECT_BULLETS,
@@ -457,8 +503,26 @@ def _tailor_with_gemini(
         raise ValueError("Tailoring call did not return a JSON object")
 
     result = _validate_against_source(result, experiences, candidates, skills)
+    if fixed_selection:
+        result["selected_projects"] = _enforce_selection(result["selected_projects"], candidates)
     result = _repair_long_bullets(result)
     return result
+
+
+def _enforce_selection(returned: list[dict], candidates: list[dict]) -> list[dict]:
+    """The user's choice is final: every chosen project appears, in their
+    order, even if the model dropped or reordered one. A dropped project falls
+    back to its approved bullets (or its evidence) rather than disappearing."""
+    by_id = {e["entry_id"]: e for e in returned}
+    out = []
+    for rank, c in enumerate(candidates, 1):
+        entry = by_id.get(c["id"]) or {
+            "entry_id": c["id"], "reason": "chosen by you",
+            "tech_stack": list(c["tech_stack"]),
+            "bullets": list(c.get("approved_bullets") or c["raw_bullets"])[:MAX_PROJECT_BULLETS],
+        }
+        out.append({**entry, "rank": rank})
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -897,19 +961,31 @@ def _load_experiences(session, user_id) -> list[dict]:
 
 def _load_projects(session, user_id) -> list[dict]:
     rows = session.execute(
-        text("SELECT id, title, description, tech_stack, github_url, live_url, highlights "
+        text("SELECT id, title, summary, role, description, tech_stack, github_url, live_url, "
+             "highlights, key_points, resume_bullets, priority, is_favourite "
              "FROM project WHERE user_id = :uid AND status = 'verified' "
-             "ORDER BY created_at DESC"),
+             "ORDER BY is_favourite DESC, priority DESC, updated_at DESC"),
         {"uid": user_id},
     ).mappings().fetchall()
-    return [{
-        "id": str(r["id"]),
-        "title": r["title"],
-        "raw_bullets": _split_bullets(r["description"], r["highlights"]),
-        "tech_stack": list(r["tech_stack"] or []),
-        "github_url": r["github_url"],
-        "live_url": r["live_url"],
-    } for r in rows]
+    out = []
+    for r in rows:
+        key_points = [k for k in (r["key_points"] or []) if k and k.strip()]
+        out.append({
+            "id": str(r["id"]),
+            "title": r["title"],
+            "summary": r["summary"],
+            "role": r["role"],
+            # Key points are the evidence; fall back to splitting prose for
+            # projects that have not been curated yet.
+            "raw_bullets": key_points or _split_bullets(r["description"], r["highlights"]),
+            "approved_bullets": [b for b in (r["resume_bullets"] or []) if b and b.strip()],
+            "tech_stack": list(r["tech_stack"] or []),
+            "github_url": r["github_url"],
+            "live_url": r["live_url"],
+            "priority": r["priority"],
+            "is_favourite": r["is_favourite"],
+        })
+    return out
 
 
 def _load_skills(session, user_id) -> list[dict]:

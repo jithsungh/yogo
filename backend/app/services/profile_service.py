@@ -1,66 +1,46 @@
-"""Profile (basic info) service — create, read, update.
-
-Profile is a singleton per user (PK = user_id), so there's no list/delete.
-"""
+"""Profile (basic info): a singleton per user, so get + upsert only."""
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.models import ProfileBasic
-from app.services.kb_sync import sync_kb_chunk, delete_kb_chunk
+from app.schemas.kb import ProfileIn, ProfileOut
+from app.services.kb_sync import sync_kb_chunk
 
 
-def to_embedding_text(row: ProfileBasic) -> str:
+def to_embedding_text(row) -> str:
+    """Name, location and summary. The old text was only "<name>. Based in
+    <city>." - a background question retrieved nothing useful from it."""
     parts = [row.full_name or ""]
-    if row.summary:
-        parts.append(row.summary)
     if row.location:
         parts.append(f"Based in {row.location}.")
-    return ". ".join(p for p in parts if p)
+    if row.summary:
+        parts.append(row.summary)
+    if row.links:
+        parts.append("Profiles: " + ", ".join(sorted(row.links)) + ".")
+    return " ".join(p for p in parts if p)
 
 
-def get_profile(session: Session, *, user_id: uuid.UUID) -> ProfileBasic | None:
-    return session.get(ProfileBasic, user_id)
+def get_profile(session: Session, *, user_id: uuid.UUID) -> ProfileOut | None:
+    row = session.get(ProfileBasic, uuid.UUID(str(user_id)))
+    return ProfileOut.model_validate(row) if row else None
 
 
-def upsert_profile(
-    session: Session,
-    *,
-    user_id: uuid.UUID,
-    full_name: str,
-    email: str | None = None,
-    phone: str | None = None,
-    location: str | None = None,
-    links: dict | None = None,
-    summary: str | None = None,
-) -> ProfileBasic:
-    row = session.get(ProfileBasic, user_id)
+def upsert_profile(session: Session, *, user_id: uuid.UUID, **fields) -> ProfileOut:
+    data = ProfileIn.model_validate(fields)
+    uid = uuid.UUID(str(user_id))
+    row = session.get(ProfileBasic, uid)
     if row is None:
-        row = ProfileBasic(
-            user_id=user_id,
-            full_name=full_name,
-            email=email,
-            phone=phone,
-            location=location,
-            links=links or {},
-            summary=summary,
-        )
+        row = ProfileBasic(user_id=uid, **data.model_dump())
         session.add(row)
     else:
-        row.full_name = full_name
-        row.email = email
-        row.phone = phone
-        row.location = location
-        row.links = links or {}
-        row.summary = summary
+        for k, v in data.model_dump().items():
+            setattr(row, k, v)
+        row.updated_at = func.now()
     session.flush()
-    sync_kb_chunk(
-        session,
-        user_id=user_id,
-        source_table="profile_basic",
-        source_id=user_id,  # PK is user_id itself
-        content_type="basic_info",
-        text_for_embedding=to_embedding_text(row),
-    )
+    session.refresh(row)
+    sync_kb_chunk(session, user_id=uid, source_table="profile_basic", source_id=uid,
+                  content_type="basic_info", text_for_embedding=to_embedding_text(row))
     session.commit()
-    return row
+    return ProfileOut.model_validate(row)
